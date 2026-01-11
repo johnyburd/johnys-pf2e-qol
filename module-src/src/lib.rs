@@ -53,7 +53,7 @@ pub fn main() {
         SettingConfig::new()
             .name("Enable Damage Popups")
             .hint("Enable or disable automatic damage popup windows when you receive damage")
-            .scope("world")
+            .scope("client")
             .config(true)
             .type_boolean()
             .default_bool(true)
