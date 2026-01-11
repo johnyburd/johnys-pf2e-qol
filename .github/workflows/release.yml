@@ -47,7 +47,8 @@ jobs:
 
           # Copy module files
           cp -r languages dist/
-          cp -r module-src/pkg dist/
+          mkdir -p dist/module-src
+          cp -r module-src/pkg dist/module-src/
           cp -r scripts dist/
           cp -r styles dist/
           cp -r templates dist/
