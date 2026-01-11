@@ -1,0 +1,68 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract Version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' module-src/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Building version: ${VERSION}"
+
+          sed -i "s/\"version\": \".*\"/\"version\": \"${VERSION}\"/" module.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM Module
+        run: |
+          cd module-src
+          wasm-pack build --target web
+          cd ..
+
+      - name: Prepare Release
+        run: |
+          mkdir -p dist
+
+          # Copy module files
+          cp -r languages dist/
+          cp -r module-src/pkg dist/
+          cp -r scripts dist/
+          cp -r styles dist/
+          cp -r templates dist/
+          cp module.json dist/
+
+          cd dist
+          sed -i 's~"manifest":.*~"manifest": "https://github.com/${{ github.repository }}/releases/latest/download/module.json",~' module.json
+          sed -i 's~"download":.*~"download": "https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/module.zip",~' module.json
+
+          zip -r ../module.zip . -x "*.git*"
+          cd ..
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "module.zip,dist/module.json"
+          allowUpdates: true
+          replacesArtifacts: true
+          token: ${{ secrets.GITHUB_TOKEN }}

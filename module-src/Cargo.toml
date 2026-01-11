@@ -6,7 +6,7 @@ description = "A simple foundry module with wasm-pack"
 edition = "2021"
 license = "MIT"
 keywords = ["foundry", "vtt"]
-repository = "https://github.com/johnyburd/johnys-module"
+repository = "https://github.com/johnyburd/johnys-pf2e-qol"
 
 [lib]
 crate-type = ["cdylib"]

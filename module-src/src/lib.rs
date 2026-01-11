@@ -51,7 +51,6 @@ async fn handle_damage_roll(message: Message) -> Result<(), String> {
 #[wasm_bindgen]
 pub fn main() {
     hook!("init", || {
-        // Register damage popup enable/disable setting
         SettingConfig::new()
             .name("Enable Damage Popups")
             .hint("Enable or disable automatic damage popup windows when you receive damage")
@@ -61,7 +60,6 @@ pub fn main() {
             .default_bool(true)
             .register(ID, "popupEnabled");
 
-        // Register GM ownership strategy setting
         GMStrategy::register_setting(ID);
     });
 
