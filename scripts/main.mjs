@@ -1,0 +1,4 @@
+import init, { main } from "../module-src/pkg/johnys_module.js";
+init().then(() => {
+    main();
+});

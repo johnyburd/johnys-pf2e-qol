@@ -1,0 +1,30 @@
+{
+    "id": "johnys-module",
+    "name": "johnys-pf2e-qol",
+    "title": "Johny's PF2e QoL",
+    "description": "A simple QoL module for pathfinder second edition",
+    "url": "https://github.com/johnyburd/johnys-pf2e-qol/",
+    "authors": [
+        {
+            "name": "johnyburd"
+        }
+    ],
+    "version": "0.1.0",
+    "compatibility": {
+        "minimum": 11,
+        "verified": 13
+    },
+    "esmodules": [
+        "scripts/main.mjs"
+    ],
+    "languages": [
+        {
+            "lang": "en",
+            "name": "English",
+            "path": "languages/en.json"
+        }
+    ],
+    "styles": [
+        "styles/style.css"
+    ]
+}
