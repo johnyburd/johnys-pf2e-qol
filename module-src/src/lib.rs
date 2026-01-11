@@ -22,7 +22,6 @@ fn is_popup_enabled() -> bool {
 }
 
 async fn handle_damage_roll(message: Message) -> Result<(), String> {
-    // Check if popups are enabled
     if !is_popup_enabled() {
         return Ok(());
     }
