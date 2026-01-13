@@ -1,6 +1,6 @@
 [package]
 name = "johnys-module"
-version = "0.2.5"
+version = "0.2.6"
 authors = ["johnyburd <jonathan@johnyburd.com>"]
 description = "A simple foundry module with wasm-pack"
 edition = "2021"

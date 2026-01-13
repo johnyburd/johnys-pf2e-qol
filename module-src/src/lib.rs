@@ -112,15 +112,24 @@ async fn handle_damage_roll(message: Message) -> Result<(), String> {
     if !is_enabled("popupEnabled") || !is_enabled("globalPopupEnabled") {
         return Ok(());
     }
-
     let Some(context) = message.pf2e_context() else {
         return Ok(());
     };
-    let actor = context.target_actor().await.ctx("target actor")?;
+
+    let vanilla_target = context.target_actor().await.ok();
+    let tokens = message.toolbelt_targets().await;
+    let actors = tokens
+        .iter()
+        .flat_map(|t| t.actor())
+        .chain(vanilla_target.into_iter());
+
     let gm_strategy = GMStrategy::from_settings(ID);
-    if actor.is_owned_by_current_user(gm_strategy) {
-        let _ = wait_for_dice_animation(&message).await;
-        message.popup().await.ctx("popout")?;
+    for actor in actors {
+        if actor.is_owned_by_current_user(gm_strategy) {
+            let _ = wait_for_dice_animation(&message).await;
+            message.popup().await.ctx("popout")?;
+            break;
+        }
     }
 
     Ok(())
