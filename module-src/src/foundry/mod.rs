@@ -591,27 +591,30 @@ impl UserCollection {
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GMStrategy {
-    Always,
+    Normal,
     Never,
-    #[default]
     OnlyIfExclusive,
+    #[default]
+    IfNoPlayers,
 }
 
 impl GMStrategy {
     pub fn from_setting_value(value: &str) -> Self {
         match value {
-            "always" => GMStrategy::Always,
+            "normal" => GMStrategy::Normal,
             "never" => GMStrategy::Never,
             "onlyIfExclusive" => GMStrategy::OnlyIfExclusive,
+            "ifNoPlayers" => GMStrategy::IfNoPlayers,
             _ => GMStrategy::default(),
         }
     }
 
     pub fn to_setting_value(&self) -> &'static str {
         match self {
-            GMStrategy::Always => "always",
+            GMStrategy::Normal => "normal",
             GMStrategy::Never => "never",
             GMStrategy::OnlyIfExclusive => "onlyIfExclusive",
+            GMStrategy::IfNoPlayers => "ifNoPlayers",
         }
     }
 
@@ -634,11 +637,15 @@ impl GMStrategy {
             .type_string()
             .default_string("onlyIfExclusive")
             .choices(&[
-                ("always", "Default GM ownership"),
+                ("normal", "Default GM ownership"),
                 ("never", "Never (GM never counts as owner)"),
                 (
                     "onlyIfExclusive",
-                    "Only if Exclusive (GM is considered owner if no players own the actor)",
+                    "Only if Exclusive (GM is not considered owner if any players own the actor)",
+                ),
+                (
+                    "ifNoPlayers",
+                    "If no players (GM is considered owner if no players own the actor)",
                 ),
             ])
             .register(module_id, "gmStrategy");
@@ -771,7 +778,7 @@ impl Actor {
         let owns = level_num >= 3.0;
 
         match count_gm {
-            GMStrategy::Always => owns,
+            GMStrategy::Normal => owns,
             GMStrategy::Never => {
                 if is_gm {
                     false
@@ -781,6 +788,14 @@ impl Actor {
             }
             GMStrategy::OnlyIfExclusive => {
                 if is_gm && owns {
+                    let has_non_gm_owners = self.has_non_gm_owners();
+                    !has_non_gm_owners
+                } else {
+                    owns
+                }
+            }
+            GMStrategy::IfNoPlayers => {
+                if is_gm {
                     let has_non_gm_owners = self.has_non_gm_owners();
                     !has_non_gm_owners
                 } else {
@@ -898,6 +913,7 @@ impl Message {
         let flags = get_property(&self.inner, "flags").ok()?;
         let pf2e = get_property(&flags, "pf2e").ok()?;
         let context = get_property(&pf2e, "context").ok()?;
+        //cprintln!("PF2e context: {:?}", context);
 
         let type_val = get_property(&context, "type").ok()?;
         let type_str = type_val.as_string()?;
