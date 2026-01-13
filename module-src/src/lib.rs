@@ -182,7 +182,7 @@ fn register_settings() {
     SettingConfig::new()
         .name("Enable Damage Popups (Global)")
         .hint("Enable or disable automatic damage popup windows when your player's tokens receive damage.")
-        .scope("client")
+        .scope("world")
         .config(true)
         .type_boolean()
         .default_bool(true)
