@@ -637,7 +637,7 @@ impl GMStrategy {
             .type_string()
             .default_string("onlyIfExclusive")
             .choices(&[
-                ("normal", "Default GM ownership"),
+                ("normal", "GM uses default ownership setting"),
                 ("never", "Never (GM never counts as owner)"),
                 (
                     "onlyIfExclusive",
@@ -765,16 +765,14 @@ impl Actor {
         };
         let is_gm = user.is_gm();
 
-        // Check basic ownership
         let Ok(ownership) = get_property(&self.inner, "ownership") else {
             return false;
         };
-        let Ok(level) = get_property(&ownership, &user_id) else {
-            return false;
-        };
-        let Some(level_num) = level.as_f64() else {
-            return false;
-        };
+        let level_num = get_property(&ownership, &user_id)
+            .map(|l| l.as_f64())
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let owns = level_num >= 3.0;
 
         match count_gm {
@@ -913,7 +911,6 @@ impl Message {
         let flags = get_property(&self.inner, "flags").ok()?;
         let pf2e = get_property(&flags, "pf2e").ok()?;
         let context = get_property(&pf2e, "context").ok()?;
-        //cprintln!("PF2e context: {:?}", context);
 
         let type_val = get_property(&context, "type").ok()?;
         let type_str = type_val.as_string()?;
@@ -923,6 +920,32 @@ impl Message {
         } else {
             None
         }
+    }
+
+    /// Get target tokens from pf2e-toolbelt targetHelper
+    pub async fn toolbelt_targets(&self) -> Vec<Token> {
+        let mut targets = Vec::new();
+
+        let Ok(targets_array) = get_path!(&self.inner, "flags.pf2e-toolbelt.targetHelper.targets")
+        else {
+            return vec![];
+        };
+
+        let Ok(Some(iter)) = js_sys::try_iter(&targets_array) else {
+            return vec![];
+        };
+
+        for target_result in iter {
+            if let Ok(target_uuid) = target_result {
+                if let Some(uuid_str) = target_uuid.as_string() {
+                    if let Ok(token_js) = from_uuid_raw(&uuid_str).await {
+                        targets.push(token_js.into());
+                    }
+                }
+            }
+        }
+
+        targets
     }
 
     /// Pop out this message into its own window
@@ -940,7 +963,6 @@ impl Message {
         let args = js_sys::Array::new();
         args.push(&options);
         let popout = js_sys::Reflect::construct(chat_popout_class.unchecked_ref(), &args)?;
-
 
         let render_fn = get_property(&popout, "render")?;
         let render_args = js_sys::Array::new();
@@ -1014,8 +1036,7 @@ impl From<JsValue> for DamageContext {
 impl DamageContext {
     /// Get the target actor UUID
     pub fn target_actor_uuid(&self) -> Option<String> {
-        let target = get_property(&self.inner, "target").ok()?;
-        get_string_property(&target, "actor")
+        get_path!(&self.inner, "target.actor").ok()?.as_string()
     }
 
     /// Get the target actor
@@ -1096,7 +1117,11 @@ impl HtmlElement {
         Ok(())
     }
 
-    pub fn add_event_listener(&self, event_type: &str, callback: &Closure<dyn Fn(JsValue)>) -> Result<(), JsValue> {
+    pub fn add_event_listener(
+        &self,
+        event_type: &str,
+        callback: &Closure<dyn Fn(JsValue)>,
+    ) -> Result<(), JsValue> {
         let add_listener_fn = get_property(&self.inner, "addEventListener")?;
         let args = js_sys::Array::new();
         args.push(jstr!(event_type));

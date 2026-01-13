@@ -117,3 +117,23 @@ macro_rules! jstr {
         &::wasm_bindgen::JsValue::from_str($str)
     };
 }
+
+
+#[macro_export]
+macro_rules! get_path {
+    ($obj:expr, $path:expr) => {{
+        let obj = $obj;
+        let path = $path;
+        let parts: Vec<&str> = path.split('.').collect();
+
+        let mut result = Ok(obj.clone());
+        for part in parts {
+            if let Ok(ref current) = result {
+                result = $crate::foundry::get_property(current, part);
+            } else {
+                break
+            }
+        }
+        result
+    }};
+}
