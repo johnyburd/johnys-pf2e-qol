@@ -1,6 +1,9 @@
 mod foundry;
 
 use foundry::{application, cprintln, *};
+use futures::channel::mpsc;
+use futures::FutureExt;
+use futures::StreamExt;
 use gloo_timers::future::TimeoutFuture;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -116,11 +119,29 @@ async fn handle_damage_roll(message: Message) -> Result<(), String> {
     let actor = context.target_actor().await.ctx("target actor")?;
     let gm_strategy = GMStrategy::from_settings(ID);
     if actor.is_owned_by_current_user(gm_strategy) {
-        //cprintln!("Current user owns the damaged actor!");
-        TimeoutFuture::new(200).await;
+        let _ = wait_for_dice_animation(&message).await;
         message.popup().await.ctx("popout")?;
     }
 
+    Ok(())
+}
+
+async fn wait_for_dice_animation(message: &Message) -> Result<(), JsValue> {
+    if !Game::instance()?.is_module_active("dice-so-nice") {
+        return Ok(());
+    }
+    let message_id = message.id();
+    let (tx, mut rx) = mpsc::unbounded();
+    hook_once!("diceSoNiceRollComplete", |dice_message_id: JsValue| {
+        if dice_message_id.as_string() == message_id {
+            let _ = tx.unbounded_send(());
+        }
+    });
+
+    futures::select! {
+        _ = rx.next() => {},
+        _ = TimeoutFuture::new(3000).fuse() => {},
+    }
     Ok(())
 }
 
@@ -176,7 +197,7 @@ fn register_settings() {
 
     SettingConfig::new()
         .name("Enable Damage Popups (Global)")
-        .hint("Enable or disable automatic damage popup windows when your player's tokens receive damage.")
+        .hint("Enable or disable automatic damage popup windows when your players tokens receive damage.")
         .scope("world")
         .config(true)
         .type_boolean()

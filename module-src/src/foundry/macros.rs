@@ -6,16 +6,13 @@ macro_rules! cprintln {
 }
 pub(crate) use cprintln;
 
-/// Register a Foundry VTT hook with automatic async support
-///
-/// # Examples
-///
+
+///https://foundryvtt.com/api/classes/foundry.helpers.Hooks.html#on
+/// 
 /// ```
-/// // Sync hook with no arguments
 /// hook!("init", || {
 ///     cprintln!("Module initialized");
 /// });
-/// // Async hook with one argument
 /// hook!("createChatMessage", async |message: JsValue| {
 ///     handle_message(message).await;
 /// });
@@ -28,7 +25,7 @@ macro_rules! hook {
             Box::new(|| $body) as Box<dyn Fn()>
         );
         $crate::foundry::hooks_on($hook_name, &closure);
-        closure.forget();
+        closure.into_js_value();
     }};
 
     // Async hook with no arguments
@@ -39,16 +36,16 @@ macro_rules! hook {
             }) as Box<dyn Fn()>
         );
         $crate::foundry::hooks_on($hook_name, &closure);
-        closure.forget();
+        closure.into_js_value();
     }};
 
     // Sync hook with one argument
     ($hook_name:expr, |$arg:ident $(: $arg_type:ty)?| $body:block) => {{
         let closure = ::wasm_bindgen::prelude::Closure::wrap(
-            Box::new(|$arg $(: $arg_type)?| $body) as Box<dyn Fn(::wasm_bindgen::JsValue)>
+            Box::new(move |$arg $(: $arg_type)?| $body) as Box<dyn Fn(::wasm_bindgen::JsValue)>
         );
         $crate::foundry::hooks_on_1($hook_name, &closure);
-        closure.forget();
+        closure.into_js_value();
     }};
 
     // Async hook with one argument
@@ -59,7 +56,7 @@ macro_rules! hook {
             }) as Box<dyn Fn(::wasm_bindgen::JsValue)>
         );
         $crate::foundry::hooks_on_1($hook_name, &closure);
-        closure.forget();
+        closure.into_js_value();
     }};
 
     // Sync hook with two arguments
@@ -80,6 +77,30 @@ macro_rules! hook {
         );
         $crate::foundry::hooks_on_2($hook_name, &closure);
         closure.forget();
+    }};
+}
+
+/// https://foundryvtt.com/api/classes/foundry.helpers.Hooks.html#once
+#[macro_export]
+macro_rules! hook_once {
+    // Sync hook with one argument
+    ($hook_name:expr, |$arg:ident $(: $arg_type:ty)?| $body:block) => {{
+        let closure = ::wasm_bindgen::prelude::Closure::wrap(
+            Box::new(move |$arg $(: $arg_type)?| $body) as Box<dyn Fn(::wasm_bindgen::JsValue)>
+        );
+        $crate::foundry::hooks_once_1($hook_name, &closure);
+        closure.into_js_value();
+    }};
+
+    // Async hook with one argument
+    ($hook_name:expr, async |$arg:ident $(: $arg_type:ty)?| $body:block) => {{
+        let closure = ::wasm_bindgen::prelude::Closure::wrap(
+            Box::new(|$arg $(: $arg_type)?| {
+                ::wasm_bindgen_futures::spawn_local(async move $body);
+            }) as Box<dyn Fn(::wasm_bindgen::JsValue)>
+        );
+        $crate::foundry::hooks_once_1($hook_name, &closure);
+        closure.into_js_value();
     }};
 }
 

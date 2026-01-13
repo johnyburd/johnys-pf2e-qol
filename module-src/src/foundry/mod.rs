@@ -31,6 +31,9 @@ extern "C" {
     #[wasm_bindgen(js_namespace = Hooks, js_name = on)]
     pub fn hooks_on_2(hook: &str, r#fn: &Closure<dyn Fn(JsValue, JsValue)>) -> i32;
 
+    #[wasm_bindgen(js_namespace = Hooks, js_name = once)]
+    pub fn hooks_once_1(hook: &str, r#fn: &Closure<dyn Fn(JsValue)>) -> i32;
+
     // fromUuid global function
     #[wasm_bindgen(catch, js_name = fromUuid)]
     pub async fn from_uuid_raw(uuid: &str) -> Result<JsValue, JsValue>;
