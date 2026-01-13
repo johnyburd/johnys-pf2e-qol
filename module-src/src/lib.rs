@@ -112,9 +112,17 @@ async fn handle_damage_roll(message: Message) -> Result<(), String> {
     if !is_enabled("popupEnabled") || !is_enabled("globalPopupEnabled") {
         return Ok(());
     }
+    let msg_type = message.pf2e_type().unwrap_or_default();
+    if !matches!(msg_type.as_str(), "damage-roll" | "spell-cast") {
+        return Ok(());
+    }
+
     let Some(context) = message.pf2e_context() else {
         return Ok(());
     };
+    if msg_type == "spell-cast" && context.options().iter().any(|i| i == "damaging-effect") {
+        return Ok(());
+    }
 
     let vanilla_target = context.target_actor().await.ok();
     let tokens = message.toolbelt_targets().await;
@@ -126,7 +134,9 @@ async fn handle_damage_roll(message: Message) -> Result<(), String> {
     let gm_strategy = GMStrategy::from_settings(ID);
     for actor in actors {
         if actor.is_owned_by_current_user(gm_strategy) {
-            let _ = wait_for_dice_animation(&message).await;
+            if &msg_type == "damage-roll" {
+                let _ = wait_for_dice_animation(&message).await;
+            }
             message.popup().await.ctx("popout")?;
             break;
         }

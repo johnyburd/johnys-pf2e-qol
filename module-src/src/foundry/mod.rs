@@ -886,6 +886,11 @@ impl Message {
         get_string_property(&self.inner, "content")
     }
 
+    pub fn pf2e_type(&self) -> Option<String> {
+        let type_val = get_path!(&self.inner, "flags.pf2e.context.type").ok()?;
+        type_val.as_string()
+    }
+
     /// Get the rolls associated with this message
     pub fn rolls(&self) -> Vec<Roll> {
         let mut rolls = Vec::new();
@@ -907,19 +912,10 @@ impl Message {
     }
 
     /// Get PF2e context information
-    pub fn pf2e_context(&self) -> Option<DamageContext> {
-        let flags = get_property(&self.inner, "flags").ok()?;
-        let pf2e = get_property(&flags, "pf2e").ok()?;
-        let context = get_property(&pf2e, "context").ok()?;
-
-        let type_val = get_property(&context, "type").ok()?;
-        let type_str = type_val.as_string()?;
-
-        if type_str == "damage-roll" {
-            Some(context.into())
-        } else {
-            None
-        }
+    pub fn pf2e_context(&self) -> Option<Pf2eContext> {
+        get_path!(&self.inner, "flags.pf2e.context")
+            .ok()
+            .map(Into::into)
     }
 
     /// Get target tokens from pf2e-toolbelt targetHelper
@@ -1023,17 +1019,17 @@ impl Roll {
 }
 
 /// PF2e damage context information
-pub struct DamageContext {
+pub struct Pf2eContext {
     inner: JsValue,
 }
 
-impl From<JsValue> for DamageContext {
+impl From<JsValue> for Pf2eContext {
     fn from(inner: JsValue) -> Self {
-        DamageContext { inner }
+        Pf2eContext { inner }
     }
 }
 
-impl DamageContext {
+impl Pf2eContext {
     /// Get the target actor UUID
     pub fn target_actor_uuid(&self) -> Option<String> {
         get_path!(&self.inner, "target.actor").ok()?.as_string()
@@ -1051,6 +1047,20 @@ impl DamageContext {
     pub fn item_name(&self) -> Option<String> {
         let item = get_property(&self.inner, "item").ok()?;
         get_string_property(&item, "name")
+    }
+
+    pub fn options(&self) -> Vec<String> {
+        get_path!(&self.inner, "options")
+            .map(|jsval| {
+                js_sys::try_iter(&jsval).ok().flatten().map(|iter| {
+                    iter.into_iter()
+                        .flat_map(|val| val.map(|val| val.as_string()).ok().flatten())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .ok()
+            .flatten()
+            .unwrap_or_default()
     }
 
     /// Get the underlying JsValue (for compatibility)
