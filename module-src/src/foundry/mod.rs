@@ -34,6 +34,9 @@ extern "C" {
     #[wasm_bindgen(js_namespace = Hooks, js_name = once)]
     pub fn hooks_once_1(hook: &str, r#fn: &Closure<dyn Fn(JsValue)>) -> i32;
 
+    #[wasm_bindgen(js_namespace = Hooks, js_name = off)]
+    pub fn hooks_off(hook: &str, hook_id: i32);
+
     // fromUuid global function
     #[wasm_bindgen(catch, js_name = fromUuid)]
     pub async fn from_uuid_raw(uuid: &str) -> Result<JsValue, JsValue>;
@@ -896,7 +899,6 @@ impl Message {
         let pf2e = get_property(&flags, "pf2e").ok()?;
         let context = get_property(&pf2e, "context").ok()?;
 
-        // Check if this is a damage roll
         let type_val = get_property(&context, "type").ok()?;
         let type_str = type_val.as_string()?;
 

@@ -132,17 +132,19 @@ async fn wait_for_dice_animation(message: &Message) -> Result<(), JsValue> {
     }
     let message_id = message.id();
     let (tx, mut rx) = mpsc::unbounded();
-    hook_once!("diceSoNiceRollComplete", |dice_message_id: JsValue| {
+    let hook_id = hook!("diceSoNiceRollComplete", |dice_message_id: JsValue| {
         if dice_message_id.as_string() == message_id {
             let _ = tx.unbounded_send(());
         }
     });
 
-    futures::select! {
-        _ = rx.next() => {},
-        _ = TimeoutFuture::new(3000).fuse() => {},
-    }
-    Ok(())
+    let result = futures::select! {
+        _ = rx.next() => Ok(()),
+        _ = TimeoutFuture::new(20_000).fuse() => Err(JsValue::from_str("gave up")),
+    };
+
+    hooks_off("diceSoNiceRollComplete", hook_id);
+    result
 }
 
 /// Open the equipment screen for the selected actor

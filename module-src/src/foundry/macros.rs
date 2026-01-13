@@ -24,8 +24,9 @@ macro_rules! hook {
         let closure = ::wasm_bindgen::prelude::Closure::wrap(
             Box::new(|| $body) as Box<dyn Fn()>
         );
-        $crate::foundry::hooks_on($hook_name, &closure);
+        let hook_id = $crate::foundry::hooks_on($hook_name, &closure);
         closure.into_js_value();
+        hook_id
     }};
 
     // Async hook with no arguments
@@ -35,8 +36,9 @@ macro_rules! hook {
                 ::wasm_bindgen_futures::spawn_local(async move $body);
             }) as Box<dyn Fn()>
         );
-        $crate::foundry::hooks_on($hook_name, &closure);
+        let hook_id = $crate::foundry::hooks_on($hook_name, &closure);
         closure.into_js_value();
+        hook_id
     }};
 
     // Sync hook with one argument
@@ -44,8 +46,9 @@ macro_rules! hook {
         let closure = ::wasm_bindgen::prelude::Closure::wrap(
             Box::new(move |$arg $(: $arg_type)?| $body) as Box<dyn Fn(::wasm_bindgen::JsValue)>
         );
-        $crate::foundry::hooks_on_1($hook_name, &closure);
+        let hook_id = $crate::foundry::hooks_on_1($hook_name, &closure);
         closure.into_js_value();
+        hook_id
     }};
 
     // Async hook with one argument
@@ -55,8 +58,9 @@ macro_rules! hook {
                 ::wasm_bindgen_futures::spawn_local(async move $body);
             }) as Box<dyn Fn(::wasm_bindgen::JsValue)>
         );
-        $crate::foundry::hooks_on_1($hook_name, &closure);
+        let hook_id = $crate::foundry::hooks_on_1($hook_name, &closure);
         closure.into_js_value();
+        hook_id
     }};
 
     // Sync hook with two arguments
@@ -64,8 +68,9 @@ macro_rules! hook {
         let closure = ::wasm_bindgen::prelude::Closure::wrap(
             Box::new(|$arg1 $(: $arg1_type)?, $arg2 $(: $arg2_type)?| $body) as Box<dyn Fn(::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue)>
         );
-        $crate::foundry::hooks_on_2($hook_name, &closure);
+        let hook_id = $crate::foundry::hooks_on_2($hook_name, &closure);
         closure.forget();
+        hook_id
     }};
 
     // Async hook with two arguments
@@ -75,8 +80,9 @@ macro_rules! hook {
                 ::wasm_bindgen_futures::spawn_local(async move $body);
             }) as Box<dyn Fn(::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue)>
         );
-        $crate::foundry::hooks_on_2($hook_name, &closure);
+        let hook_id = $crate::foundry::hooks_on_2($hook_name, &closure);
         closure.forget();
+        hook_id
     }};
 }
 
