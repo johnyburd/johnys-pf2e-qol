@@ -1,6 +1,7 @@
 mod foundry;
 
 use foundry::{application, cprintln, *};
+use gloo_timers::future::TimeoutFuture;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -113,16 +114,10 @@ async fn handle_damage_roll(message: Message) -> Result<(), String> {
         return Ok(());
     };
     let actor = context.target_actor().await.ctx("target actor")?;
-    let damage = message.first_roll().map(|roll| roll.total()).unwrap_or(0.0);
-
-    //cprintln!("Final damage value: {}", damage);
-    if damage <= 0.0 {
-        return Ok(());
-    }
-
     let gm_strategy = GMStrategy::from_settings(ID);
     if actor.is_owned_by_current_user(gm_strategy) {
         //cprintln!("Current user owns the damaged actor!");
+        TimeoutFuture::new(200).await;
         message.popup().await.ctx("popout")?;
     }
 
