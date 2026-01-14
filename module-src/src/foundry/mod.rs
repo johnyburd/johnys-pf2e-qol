@@ -4,6 +4,7 @@
 // It wraps the JavaScript objects in strongly-typed Rust structs.
 #![allow(dead_code)]
 
+use js_sys::try_iter;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -30,6 +31,9 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = Hooks, js_name = on)]
     pub fn hooks_on_2(hook: &str, r#fn: &Closure<dyn Fn(JsValue, JsValue)>) -> i32;
+
+    #[wasm_bindgen(js_namespace = Hooks, js_name = on)]
+    pub fn hooks_on_3(hook: &str, r#fn: &Closure<dyn Fn(JsValue, JsValue, JsValue)>) -> i32;
 
     #[wasm_bindgen(js_namespace = Hooks, js_name = once)]
     pub fn hooks_once_1(hook: &str, r#fn: &Closure<dyn Fn(JsValue)>) -> i32;
@@ -145,18 +149,6 @@ impl SettingConfig {
 
 pub struct Game {
     inner: JsValue,
-}
-
-impl Game {
-    pub fn instance() -> Result<Self, JsValue> {
-        let inner = js_sys::Reflect::get(&js_sys::global(), jstr!("game"))?;
-        Ok(Game { inner })
-    }
-
-    /// Get the underlying JsValue
-    pub fn as_js_value(&self) -> &JsValue {
-        &self.inner
-    }
 }
 
 pub struct UI {
@@ -310,9 +302,11 @@ impl Game {
         None
     }
 
-    /// Check if a module is installed and active
-    pub fn is_module_active(&self, module_id: &str) -> bool {
-        if let Ok(modules) = self.modules() {
+    pub fn is_module_active(module_id: &str) -> bool {
+        let Some(game) = Self::instance().ok() else {
+            return false;
+        };
+        if let Ok(modules) = game.modules() {
             if let Some(module) = modules.get(module_id) {
                 return module.is_active();
             }
@@ -365,6 +359,16 @@ impl Game {
         }
 
         None
+    }
+
+    pub fn instance() -> Result<Self, JsValue> {
+        let inner = js_sys::Reflect::get(&js_sys::global(), jstr!("game"))?;
+        Ok(Game { inner })
+    }
+
+    /// Get the underlying JsValue
+    pub fn as_js_value(&self) -> &JsValue {
+        &self.inner
     }
 }
 
@@ -686,29 +690,24 @@ impl Item {
 
     /// Get the item's carry type (worn, held, stowed, etc.)
     pub fn carry_type(&self) -> Option<String> {
-        if let Ok(system) = get_property(&self.inner, "system") {
-            if let Ok(equipped) = get_property(&system, "equipped") {
-                if let Ok(carry_type) = get_property(&equipped, "carryType") {
-                    return carry_type.as_string();
-                }
-            }
-        }
-        None
+        get_path!(&self.inner, "system.equipped.carryType")
+            .ok()?
+            .as_string()
     }
 
     /// Check if the item is currently wielded with two hands
     pub fn is_two_handed(&self) -> bool {
-        // Check system.equipped.handsHeld to see how many hands are being used
-        if let Ok(system) = get_property(&self.inner, "system") {
-            if let Ok(equipped) = get_property(&system, "equipped") {
-                if let Ok(hands_held) = get_property(&equipped, "handsHeld") {
-                    if let Some(hands) = hands_held.as_f64() {
-                        return hands >= 2.0;
-                    }
-                }
-            }
-        }
-        false
+        get_path!(&self.inner, "system.equipped.handsHeld")
+            .ok()
+            .map(|v| v.as_f64().unwrap_or_default() >= 2.0)
+            .unwrap_or_default()
+    }
+
+    pub fn traits(&self) -> Vec<String> {
+        get_path!(&self.inner, "system.traits.value")
+            .ok()
+            .map(|v| js_iter!(v).filter_map(|t| t.as_string()).collect())
+            .unwrap_or_default()
     }
 
     /// Check if this is a physical inventory item (not a spell, action, effect, etc.)
@@ -877,8 +876,8 @@ impl From<JsValue> for Message {
 
 impl Message {
     /// Get the message ID
-    pub fn id(&self) -> Option<String> {
-        get_string_property(&self.inner, "_id")
+    pub fn id(&self) -> String {
+        get_string_property(&self.inner, "_id").unwrap_or_default()
     }
 
     /// Get the message content
@@ -942,6 +941,29 @@ impl Message {
         }
 
         targets
+    }
+
+    /// Get all target actor UUIDs (vanilla PF2e + toolbelt)
+    pub async fn target_uuids(&self) -> Vec<String> {
+        let mut uuids = Vec::new();
+
+        // Get vanilla PF2e target
+        if let Some(context) = self.pf2e_context() {
+            if let Some(uuid) = context.target_actor_uuid() {
+                uuids.push(uuid);
+            }
+        }
+
+        // Get pf2e-toolbelt targets
+        for token in self.toolbelt_targets().await {
+            if let Some(actor) = token.actor() {
+                if let Some(uuid) = get_string_property(actor.as_js_value(), "uuid") {
+                    uuids.push(uuid);
+                }
+            }
+        }
+
+        uuids
     }
 
     /// Pop out this message into its own window

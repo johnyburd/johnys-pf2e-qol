@@ -5,10 +5,115 @@ use futures::channel::mpsc;
 use futures::FutureExt;
 use futures::StreamExt;
 use gloo_timers::future::TimeoutFuture;
+use once_cell::sync::Lazy;
 use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::Mutex;
 use wasm_bindgen::prelude::*;
 
 const ID: &str = "johnys-module";
+
+#[derive(Clone, Debug, Default)]
+struct MessageTargetState {
+    targets: Vec<String>,
+    timestamp: f64,
+    waiting_for_dice: bool,
+    animation_complete: bool,
+}
+
+impl MessageTargetState {
+    fn find_new_targets(&self, new_targets: &[String]) -> Vec<String> {
+        new_targets
+            .iter()
+            .filter(|target| !self.targets.contains(target))
+            .cloned()
+            .collect()
+    }
+
+    fn store_targets(&mut self, targets: Vec<String>) {
+        self.targets = targets;
+        if self.timestamp == 0.0 {
+            self.timestamp = now();
+        }
+    }
+}
+
+/// Wrapper around the global message state HashMap with internal mutex
+struct MessageStateMap {
+    states: Mutex<HashMap<String, MessageTargetState>>,
+}
+
+impl MessageStateMap {
+    fn new() -> Self {
+        Self {
+            states: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Get targets to check, handling dice animation waiting logic
+    fn get_targets_to_check(
+        &self,
+        message_id: &str,
+        current_targets: Vec<String>,
+        msg_type: &str,
+    ) -> Option<Vec<String>> {
+        let mut map = self.states.lock().unwrap();
+        let state = map
+            .entry(message_id.to_string())
+            .or_insert_with(MessageTargetState::default);
+
+        // If we were waiting for dice, dice are done now - clear waiting and use current targets
+        if state.waiting_for_dice {
+            cprintln!("Dice animation complete, using current targets: {current_targets:?}");
+            state.waiting_for_dice = false;
+            state.store_targets(current_targets.clone());
+            return Some(current_targets);
+        }
+
+        // Find new targets
+        let new_targets = state.find_new_targets(&current_targets);
+        cprintln!(
+            "new {current_targets:?} old {:?} newly_added {new_targets:?}",
+            state.targets
+        );
+
+        if new_targets.is_empty() {
+            return None;
+        }
+
+        // Check if we need to wait for dice animation (only if Dice So Nice is active)
+        let dice_so_nice_active = Game::is_module_active("dice-so-nice");
+        let should_wait_for_dice = msg_type == "damage-roll" && dice_so_nice_active && !state.animation_complete;
+        cprintln!("should wait for dice {should_wait_for_dice} (dsn active: {dice_so_nice_active}) {state:?} {message_id}");
+
+        if should_wait_for_dice {
+            // Mark as waiting - diceSoNiceRollComplete will trigger re-processing
+            state.waiting_for_dice = true;
+            // Store current targets so updateChatMessage doesn't re-trigger
+            state.store_targets(current_targets);
+            return None;
+        }
+
+        // Update stored targets
+        state.store_targets(current_targets);
+        Some(new_targets)
+    }
+
+    /// Clear waiting flag and return whether we were waiting
+    fn clear_waiting(&self, message_id: &str) -> bool {
+        let mut map = self.states.lock().unwrap();
+        if let Some(state) = map.get_mut(message_id) {
+            let was_waiting = state.waiting_for_dice;
+            state.animation_complete = true;
+            was_waiting
+        } else {
+            false
+        }
+    }
+}
+
+// Global state to track message targets for detecting updates
+static MESSAGE_TARGETS: Lazy<MessageStateMap> = Lazy::new(|| MessageStateMap::new());
 
 #[derive(Serialize, Clone)]
 struct EquipmentItemData {
@@ -63,15 +168,19 @@ impl From<&[Item]> for EquipmentContext {
                     context.armor = Some(item.into());
                 }
                 ("weapon" | "shield", "held") => {
-                    if item.is_two_handed() {
-                        if context.left_hand.is_none() && context.right_hand.is_none() {
-                            let item_data: EquipmentItemData = item.into();
-                            context.left_hand = Some(item_data.clone());
-                            context.right_hand = Some(item_data);
-                            context.right_hand_secondary = true;
-                        } else {
-                            context.extra_held_items.push(item.into());
+                    if item.traits().iter().any(|t| t == "free-hand") {
+                        context.extra_held_items.push(item.into());
+                    } else if item.is_two_handed() {
+                        if let Some(item) = context.left_hand.take() {
+                            context.extra_held_items.push(item)
                         }
+                        if let Some(item) = context.right_hand.take() {
+                            context.extra_held_items.push(item)
+                        }
+                        let item_data: EquipmentItemData = item.into();
+                        context.left_hand = Some(item_data.clone());
+                        context.right_hand = Some(item_data);
+                        context.right_hand_secondary = true;
                     } else {
                         if context.left_hand.is_none() {
                             context.left_hand = Some(item.into());
@@ -108,7 +217,12 @@ fn is_enabled(key: &str) -> bool {
     value.as_bool().unwrap_or(true)
 }
 
-async fn handle_damage_roll(message: Message) -> Result<(), String> {
+/// Get current timestamp in milliseconds
+fn now() -> f64 {
+    js_sys::Date::now()
+}
+
+async fn handle_damage_message(message: Message) -> Result<(), String> {
     if !is_enabled("popupEnabled") || !is_enabled("globalPopupEnabled") {
         return Ok(());
     }
@@ -123,47 +237,30 @@ async fn handle_damage_roll(message: Message) -> Result<(), String> {
     if msg_type == "spell-cast" && context.options().iter().any(|i| i == "damaging-effect") {
         return Ok(());
     }
+    let msg_id = message.id();
 
-    let vanilla_target = context.target_actor().await.ok();
-    let tokens = message.toolbelt_targets().await;
-    let actors = tokens
-        .iter()
-        .flat_map(|t| t.actor())
-        .chain(vanilla_target.into_iter());
+    // Get current targets
+    let current_targets = message.target_uuids().await;
 
+    // Get targets to check from the state map
+    let Some(targets_to_check) =
+        MESSAGE_TARGETS.get_targets_to_check(&msg_id, current_targets, &msg_type)
+    else {
+        return Ok(());
+    };
+
+    // Check if any targets belong to current user and show popup
     let gm_strategy = GMStrategy::from_settings(ID);
-    for actor in actors {
-        if actor.is_owned_by_current_user(gm_strategy) {
-            if &msg_type == "damage-roll" {
-                let _ = wait_for_dice_animation(&message).await;
+    for uuid in targets_to_check {
+        if let Ok(actor) = Game::from_uuid(&uuid).await {
+            if actor.is_owned_by_current_user(gm_strategy) {
+                message.popup().await.ctx("popout")?;
+                break;
             }
-            message.popup().await.ctx("popout")?;
-            break;
         }
     }
 
     Ok(())
-}
-
-async fn wait_for_dice_animation(message: &Message) -> Result<(), JsValue> {
-    if !Game::instance()?.is_module_active("dice-so-nice") {
-        return Ok(());
-    }
-    let message_id = message.id();
-    let (tx, mut rx) = mpsc::unbounded();
-    let hook_id = hook!("diceSoNiceRollComplete", |dice_message_id: JsValue| {
-        if dice_message_id.as_string() == message_id {
-            let _ = tx.unbounded_send(());
-        }
-    });
-
-    let result = futures::select! {
-        _ = rx.next() => Ok(()),
-        _ = TimeoutFuture::new(20_000).fuse() => Err(JsValue::from_str("gave up")),
-    };
-
-    hooks_off("diceSoNiceRollComplete", hook_id);
-    result
 }
 
 /// Open the equipment screen for the selected actor
@@ -316,21 +413,54 @@ pub fn main() {
     });
 
     hook!("createChatMessage", async |message: JsValue| {
-        if let Err(err) = handle_damage_roll(message.into()).await {
+        if let Err(err) = handle_damage_message(message.into()).await {
             cprintln!("Error in chat message handler: {err}");
         }
     });
 
-    hook!("ready", || {
-        if let Ok(game) = Game::instance() {
-            if game.is_module_active("pf2e-bestiary-tracking") {
-                cprintln!("PF2E Bestiary Tracking detected, registering equipment injection");
-                hook!("renderPF2EBestiary", async |app: JsValue, html: JsValue| {
-                    if let Err(err) = inject_equipment_ui_async(app.into(), html.into()).await {
-                        cprintln!("Error injecting equipment UI: {err:?}");
-                    }
-                });
+    hook!(
+        "updateChatMessage",
+        async |message: JsValue, _changes: JsValue, _options: JsValue| {
+            if let Err(err) = handle_damage_message(message.into()).await {
+                cprintln!("Error in message update handler: {err}");
             }
+        }
+    );
+
+    hook!(
+        "diceSoNiceRollComplete",
+        async |dice_message_id: JsValue| {
+            if let Some(msg_id) = dice_message_id.as_string() {
+                cprintln!("Dice animation complete for message {}", msg_id);
+
+                // Clear waiting flag and check if we should reprocess
+                let should_reprocess = MESSAGE_TARGETS.clear_waiting(&msg_id);
+
+                // If we were waiting for dice animation, re-process the message
+                cprintln!("Re-processing message {} after dice animation", msg_id);
+
+                if should_reprocess {
+                    // Get the message and re-process it
+                    if let Ok(game) = Game::instance() {
+                        if let Ok(Some(message)) = game.get_message(&msg_id) {
+                            if let Err(err) = handle_damage_message(message).await {
+                                cprintln!("Error re-processing message after dice: {err}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    );
+
+    hook!("ready", || {
+        if Game::is_module_active("pf2e-bestiary-tracking") {
+            cprintln!("PF2E Bestiary Tracking detected, registering equipment injection");
+            hook!("renderPF2EBestiary", async |app: JsValue, html: JsValue| {
+                if let Err(err) = inject_equipment_ui_async(app.into(), html.into()).await {
+                    cprintln!("Error injecting equipment UI: {err:?}");
+                }
+            });
         }
     });
 }

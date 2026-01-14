@@ -84,6 +84,28 @@ macro_rules! hook {
         closure.forget();
         hook_id
     }};
+
+    // Sync hook with three arguments
+    ($hook_name:expr, |$arg1:ident $(: $arg1_type:ty)?, $arg2:ident $(: $arg2_type:ty)?, $arg3:ident $(: $arg3_type:ty)?| $body:block) => {{
+        let closure = ::wasm_bindgen::prelude::Closure::wrap(
+            Box::new(|$arg1 $(: $arg1_type)?, $arg2 $(: $arg2_type)?, $arg3 $(: $arg3_type)?| $body) as Box<dyn Fn(::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue)>
+        );
+        let hook_id = $crate::foundry::hooks_on_3($hook_name, &closure);
+        closure.forget();
+        hook_id
+    }};
+
+    // Async hook with three arguments
+    ($hook_name:expr, async |$arg1:ident $(: $arg1_type:ty)?, $arg2:ident $(: $arg2_type:ty)?, $arg3:ident $(: $arg3_type:ty)?| $body:block) => {{
+        let closure = ::wasm_bindgen::prelude::Closure::wrap(
+            Box::new(|$arg1 $(: $arg1_type)?, $arg2 $(: $arg2_type)?, $arg3 $(: $arg3_type)?| {
+                ::wasm_bindgen_futures::spawn_local(async move $body);
+            }) as Box<dyn Fn(::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue)>
+        );
+        let hook_id = $crate::foundry::hooks_on_3($hook_name, &closure);
+        closure.forget();
+        hook_id
+    }};
 }
 
 /// https://foundryvtt.com/api/classes/foundry.helpers.Hooks.html#once
@@ -124,8 +146,7 @@ macro_rules! get_path {
     ($obj:expr, $path:expr) => {{
         let obj = $obj;
         let path = $path;
-        let parts: Vec<&str> = path.split('.').collect();
-
+        let parts = path.split(".");
         let mut result = Ok(obj.clone());
         for part in parts {
             if let Ok(ref current) = result {
@@ -136,4 +157,15 @@ macro_rules! get_path {
         }
         result
     }};
+}
+#[macro_export]
+macro_rules! js_iter {
+    ($jsvalue:expr) => {
+        ::js_sys::try_iter(&$jsvalue)
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(Result::ok)
+    };
 }
