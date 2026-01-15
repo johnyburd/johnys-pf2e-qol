@@ -4,15 +4,17 @@
 // It wraps the JavaScript objects in strongly-typed Rust structs.
 #![allow(dead_code)]
 
-use js_sys::try_iter;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 #[path = "macros.rs"]
 #[macro_use]
 mod macros;
+pub mod error;
 
 pub(crate) use macros::cprintln;
+
+use crate::foundry::error::{ContextExt as _, Error};
 
 #[wasm_bindgen]
 extern "C" {
@@ -156,7 +158,7 @@ pub struct UI {
 }
 
 impl UI {
-    pub fn instance() -> Result<Self, JsValue> {
+    pub fn instance() -> Result<Self, Error> {
         let inner = js_sys::Reflect::get(&js_sys::global(), jstr!("ui"))?;
         Ok(Self { inner })
     }
@@ -215,19 +217,19 @@ impl UI {
 
 impl Game {
     /// Get the current user
-    pub fn user(&self) -> Result<User, JsValue> {
+    pub fn user(&self) -> Result<User, Error> {
         let inner = get_property(&self.inner, "user")?;
         Ok(inner.into())
     }
 
     /// Get all users in the game
-    pub fn users(&self) -> Result<UserCollection, JsValue> {
+    pub fn users(&self) -> Result<UserCollection, Error> {
         let inner = get_property(&self.inner, "users")?;
         Ok(UserCollection { inner })
     }
 
     /// Get a message by ID
-    pub fn get_message(&self, id: &str) -> Result<Option<Message>, JsValue> {
+    pub fn get_message(&self, id: &str) -> Result<Option<Message>, Error> {
         let messages = get_property(&self.inner, "messages")?;
         let get_fn = get_property(&messages, "get")?;
         let args = js_sys::Array::new();
@@ -243,7 +245,7 @@ impl Game {
     }
 
     /// Resolve a UUID to an actor
-    pub async fn from_uuid(uuid: &str) -> Result<Actor, JsValue> {
+    pub async fn from_uuid(uuid: &str) -> Result<Actor, Error> {
         let inner = from_uuid_raw(uuid).await?;
         Ok(inner.into())
     }
@@ -315,7 +317,7 @@ impl Game {
     }
 
     /// Get the module collection
-    pub fn modules(&self) -> Result<ModuleCollection, JsValue> {
+    pub fn modules(&self) -> Result<ModuleCollection, Error> {
         let inner = get_property(&self.inner, "modules")?;
         Ok(ModuleCollection { inner })
     }
@@ -361,7 +363,7 @@ impl Game {
         None
     }
 
-    pub fn instance() -> Result<Self, JsValue> {
+    pub fn instance() -> Result<Self, Error> {
         let inner = js_sys::Reflect::get(&js_sys::global(), jstr!("game"))?;
         Ok(Game { inner })
     }
@@ -420,7 +422,7 @@ impl Module {
 
     /// Set a property on the module's API object
     /// This creates the `api` object if it doesn't exist
-    pub fn set_api_property(&self, key: &str, value: &JsValue) -> Result<(), JsValue> {
+    pub fn set_api_property(&self, key: &str, value: &JsValue) -> Result<(), Error> {
         // Get or create the api object
         let api = if let Ok(existing_api) = get_property(&self.inner, "api") {
             if !existing_api.is_null() && !existing_api.is_undefined() {
@@ -543,7 +545,7 @@ impl User {
     }
 
     /// Set a flag value
-    pub async fn set_flag(&self, scope: &str, key: &str, value: &JsValue) -> Result<(), JsValue> {
+    pub async fn set_flag(&self, scope: &str, key: &str, value: &JsValue) -> Result<(), Error> {
         let set_flag_fn = get_property(&self.inner, "setFlag")?;
         let args = js_sys::Array::new();
         args.push(jstr!(scope));
@@ -943,18 +945,18 @@ impl Message {
         targets
     }
 
-    /// Get all target actor UUIDs (vanilla PF2e + toolbelt)
+    /// Get all target actor UUIDs
     pub async fn target_uuids(&self) -> Vec<String> {
         let mut uuids = Vec::new();
 
-        // Get vanilla PF2e target
+        // vanilla
         if let Some(context) = self.pf2e_context() {
             if let Some(uuid) = context.target_actor_uuid() {
                 uuids.push(uuid);
             }
         }
 
-        // Get pf2e-toolbelt targets
+        // pf2e toolbelt
         for token in self.toolbelt_targets().await {
             if let Some(actor) = token.actor() {
                 if let Some(uuid) = get_string_property(actor.as_js_value(), "uuid") {
@@ -967,7 +969,7 @@ impl Message {
     }
 
     /// Pop out this message into its own window
-    pub async fn popup(&self) -> Result<(), JsValue> {
+    pub async fn popout(&self) -> Result<(), Error> {
         let global = js_sys::global();
         let foundry = get_property(&global, "foundry")?;
         let applications = get_property(&foundry, "applications")?;
@@ -993,7 +995,7 @@ impl Message {
     }
 
     /// Create a new chat message
-    pub async fn create(content: &str) -> Result<Message, JsValue> {
+    pub async fn create(content: &str) -> Result<Message, Error> {
         let obj = js_sys::Object::new();
         js_sys::Reflect::set(&obj, jstr!("content"), jstr!(content))?;
 
@@ -1058,10 +1060,8 @@ impl Pf2eContext {
     }
 
     /// Get the target actor
-    pub async fn target_actor(&self) -> Result<Actor, JsValue> {
-        let uuid = self
-            .target_actor_uuid()
-            .ok_or_else(|| JsValue::from_str("No target actor UUID"))?;
+    pub async fn target_actor(&self) -> Result<Actor, Error> {
+        let uuid = self.target_actor_uuid().ctx("No target actor UUID")?;
         Game::from_uuid(&uuid).await
     }
 
@@ -1103,7 +1103,7 @@ impl From<JsValue> for HtmlElement {
 
 impl HtmlElement {
     /// Query for a child element using a CSS selector
-    pub fn query_selector(&self, selector: &str) -> Result<Option<HtmlElement>, JsValue> {
+    pub fn query_selector(&self, selector: &str) -> Result<Option<HtmlElement>, Error> {
         let query_fn = get_property(&self.inner, "querySelector")?;
         let args = js_sys::Array::new();
         args.push(jstr!(selector));
@@ -1117,7 +1117,7 @@ impl HtmlElement {
         }
     }
 
-    pub fn append_child(&self, child: &HtmlElement) -> Result<(), JsValue> {
+    pub fn append_child(&self, child: &HtmlElement) -> Result<(), Error> {
         let append_fn = get_property(&self.inner, "appendChild")?;
         let args = js_sys::Array::new();
         args.push(&child.inner);
@@ -1125,7 +1125,7 @@ impl HtmlElement {
         Ok(())
     }
 
-    pub fn set_attribute(&self, name: &str, value: &str) -> Result<(), JsValue> {
+    pub fn set_attribute(&self, name: &str, value: &str) -> Result<(), Error> {
         let set_attr_fn = get_property(&self.inner, "setAttribute")?;
         let args = js_sys::Array::new();
         args.push(jstr!(name));
@@ -1134,17 +1134,17 @@ impl HtmlElement {
         Ok(())
     }
 
-    pub fn set_class_name(&self, class_name: &str) -> Result<(), JsValue> {
+    pub fn set_class_name(&self, class_name: &str) -> Result<(), Error> {
         js_sys::Reflect::set(&self.inner, jstr!("className"), jstr!(class_name))?;
         Ok(())
     }
 
-    pub fn set_inner_html(&self, html: &str) -> Result<(), JsValue> {
+    pub fn set_inner_html(&self, html: &str) -> Result<(), Error> {
         js_sys::Reflect::set(&self.inner, jstr!("innerHTML"), jstr!(html))?;
         Ok(())
     }
 
-    pub fn set_style(&self, style: &str) -> Result<(), JsValue> {
+    pub fn set_style(&self, style: &str) -> Result<(), Error> {
         js_sys::Reflect::set(&self.inner, jstr!("style"), jstr!(style))?;
         Ok(())
     }
@@ -1153,7 +1153,7 @@ impl HtmlElement {
         &self,
         event_type: &str,
         callback: &Closure<dyn Fn(JsValue)>,
-    ) -> Result<(), JsValue> {
+    ) -> Result<(), Error> {
         let add_listener_fn = get_property(&self.inner, "addEventListener")?;
         let args = js_sys::Array::new();
         args.push(jstr!(event_type));
@@ -1164,7 +1164,7 @@ impl HtmlElement {
 
     /// Insert HTML adjacent to this element
     /// position: "beforebegin", "afterbegin", "beforeend", or "afterend"
-    pub fn insert_adjacent_html(&self, position: &str, html: &str) -> Result<(), JsValue> {
+    pub fn insert_adjacent_html(&self, position: &str, html: &str) -> Result<(), Error> {
         let insert_fn = get_property(&self.inner, "insertAdjacentHTML")?;
         let args = js_sys::Array::new();
         args.push(jstr!(position));
@@ -1182,7 +1182,7 @@ pub struct Document;
 
 impl Document {
     /// Create a new HTML element
-    pub fn create_element(tag_name: &str) -> Result<HtmlElement, JsValue> {
+    pub fn create_element(tag_name: &str) -> Result<HtmlElement, Error> {
         let document = js_sys::Reflect::get(&js_sys::global(), jstr!("document"))?;
         let create_fn = get_property(&document, "createElement")?;
         let args = js_sys::Array::new();
@@ -1239,9 +1239,9 @@ pub mod application {
     pub async fn render_template<T: serde::ser::Serialize + ?Sized>(
         template_path: &str,
         context: &T,
-    ) -> Result<String, JsValue> {
+    ) -> Result<String, Error> {
         let context_js = serde_wasm_bindgen::to_value(&context)
-            .map_err(|e| JsValue::from_str(&format!("Failed to serialize context: {e}")))?;
+            .map_err(|e| Error::Custom(format!("Failed to serialize context: {e}")))?;
 
         let global = js_sys::global();
         let render_template_fn = get_property(&global, "renderTemplate")?;
@@ -1256,7 +1256,7 @@ pub mod application {
 
         html_value
             .as_string()
-            .ok_or_else(|| JsValue::from_str("Template did not return a string"))
+            .ctx("Template did not return a string")
     }
 
     /// Show a simple dialog window with custom HTML content
@@ -1264,7 +1264,7 @@ pub mod application {
         title: &str,
         content: String,
         buttons: Vec<(&str, &str, Option<js_sys::Function>)>,
-    ) -> Result<(), JsValue> {
+    ) -> Result<(), Error> {
         let global = js_sys::global();
         let dialog_class = get_property(&global, "Dialog")?;
 
