@@ -117,7 +117,7 @@ async fn try_open_equipment_screen() -> Result<(), Error> {
     let selected_token = hovered.as_ref().or_else(|| targeted_tokens.first());
 
     let all_items: EquipmentContext = selected_token
-        .ok_or_else(|| JsValue::from_str("Please select or target a token"))?
+        .ctx("Please select or target a token")?
         .actor_items()
         .as_slice()
         .into();
