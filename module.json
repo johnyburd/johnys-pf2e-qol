@@ -9,10 +9,10 @@
             "name": "johnyburd"
         }
     ],
-    "version": "0.2.8",
+    "version": "0.2.9",
     "compatibility": {
         "minimum": 11,
-        "verified": 13
+        "verified": 14
     },
     "esmodules": [
         "scripts/main.mjs"

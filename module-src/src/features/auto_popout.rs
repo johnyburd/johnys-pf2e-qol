@@ -47,7 +47,8 @@ async fn handle_message(message: Message) -> Result<(), Error> {
         return Ok(());
     }
     let msg_type = message.pf2e_type().unwrap_or_default();
-    if !matches!(msg_type.as_str(), "damage-roll" | "spell-cast") {
+    let is_healing_flavor = message.content().map(|c| c.contains("Healing Roll")).unwrap_or(false);
+    if !matches!(msg_type.as_str(), "damage-roll" | "spell-cast" | "healing-roll") && !is_healing_flavor {
         return Ok(());
     }
 
@@ -58,7 +59,7 @@ async fn handle_message(message: Message) -> Result<(), Error> {
         .iter()
         .any(|i| i == "damaging-effect");
 
-    if msg_type == "spell-cast" && damaging_effect {
+    if (msg_type == "spell-cast" || is_healing_flavor) && damaging_effect {
         return Ok(());
     }
     let msg_id = message.id();
