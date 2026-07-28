@@ -8,7 +8,7 @@ pub(crate) use cprintln;
 
 
 ///https://foundryvtt.com/api/classes/foundry.helpers.Hooks.html#on
-/// 
+///
 /// ```
 /// hook!("init", || {
 ///     cprintln!("Module initialized");
@@ -152,7 +152,7 @@ macro_rules! get_path {
             if let Ok(ref current) = result {
                 result = $crate::foundry::get_property(current, part);
             } else {
-                break
+                break;
             }
         }
         result
