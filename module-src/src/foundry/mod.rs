@@ -67,6 +67,55 @@ fn get_f64_property(obj: &JsValue, key: &str) -> Option<f64> {
     get_property(obj, key).ok()?.as_f64()
 }
 
+pub trait FlagDocument {
+    fn as_js_value(&self) -> &JsValue;
+
+    /// Get a flag value using Foundry's getFlag API
+    fn get_flag(&self, scope: &str, key: &str) -> JsValue {
+        let get_flag_fn = get_property(self.as_js_value(), "getFlag").expect("getFlag method");
+        let args = js_sys::Array::new();
+        args.push(jstr!(scope));
+        args.push(jstr!(key));
+
+        js_sys::Reflect::apply(get_flag_fn.unchecked_ref(), self.as_js_value(), &args)
+            .unwrap_or(JsValue::UNDEFINED)
+    }
+
+    /// Set a flag value using Foundry's setFlag API
+    async fn set_flag(&self, scope: &str, key: &str, value: &JsValue) -> Result<(), Error> {
+        let set_flag_fn = get_property(self.as_js_value(), "setFlag")?;
+        let args = js_sys::Array::new();
+        args.push(jstr!(scope));
+        args.push(jstr!(key));
+        args.push(value);
+
+        let promise =
+            js_sys::Reflect::apply(set_flag_fn.unchecked_ref(), self.as_js_value(), &args)?;
+
+        JsFuture::from(js_sys::Promise::from(promise)).await?;
+        Ok(())
+    }
+
+    fn get_flag_string(&self, scope: &str, key: &str) -> Option<String> {
+        self.get_flag(scope, key).as_string()
+    }
+
+    /// Read an arbitrary flag path directly from the flags object
+    fn flag(&self, path: &str) -> Option<JsValue> {
+        let full_path = format!("flags.{}", path);
+        let parts = full_path.split(".");
+        let mut result: Option<JsValue> = Some(self.as_js_value().clone());
+        for part in parts {
+            if let Some(ref current) = result {
+                result = get_property(current, part).ok();
+            } else {
+                break;
+            }
+        }
+        result
+    }
+}
+
 /// Builder for creating Foundry VTT settings
 pub struct SettingConfig {
     config: js_sys::Object,
@@ -531,35 +580,10 @@ impl User {
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     }
+}
 
-    /// Get a flag value
-    pub fn get_flag(&self, scope: &str, key: &str) -> JsValue {
-        // Call getFlag method on the document
-        let get_flag_fn = get_property(&self.inner, "getFlag").expect("getFlag method");
-        let args = js_sys::Array::new();
-        args.push(jstr!(scope));
-        args.push(jstr!(key));
-
-        js_sys::Reflect::apply(get_flag_fn.unchecked_ref(), &self.inner, &args)
-            .unwrap_or(JsValue::UNDEFINED)
-    }
-
-    /// Set a flag value
-    pub async fn set_flag(&self, scope: &str, key: &str, value: &JsValue) -> Result<(), Error> {
-        let set_flag_fn = get_property(&self.inner, "setFlag")?;
-        let args = js_sys::Array::new();
-        args.push(jstr!(scope));
-        args.push(jstr!(key));
-        args.push(value);
-
-        let promise = js_sys::Reflect::apply(set_flag_fn.unchecked_ref(), &self.inner, &args)?;
-
-        JsFuture::from(js_sys::Promise::from(promise)).await?;
-        Ok(())
-    }
-
-    /// Get the underlying JsValue (for compatibility)
-    pub fn as_js_value(&self) -> &JsValue {
+impl FlagDocument for User {
+    fn as_js_value(&self) -> &JsValue {
         &self.inner
     }
 }
@@ -602,6 +626,7 @@ pub enum GMStrategy {
     OnlyIfExclusive,
     #[default]
     IfNoPlayers,
+    Always,
 }
 
 impl GMStrategy {
@@ -611,6 +636,7 @@ impl GMStrategy {
             "never" => GMStrategy::Never,
             "onlyIfExclusive" => GMStrategy::OnlyIfExclusive,
             "ifNoPlayers" => GMStrategy::IfNoPlayers,
+            "always" => GMStrategy::Always,
             _ => GMStrategy::default(),
         }
     }
@@ -621,6 +647,7 @@ impl GMStrategy {
             GMStrategy::Never => "never",
             GMStrategy::OnlyIfExclusive => "onlyIfExclusive",
             GMStrategy::IfNoPlayers => "ifNoPlayers",
+            GMStrategy::Always => "always",
         }
     }
 
@@ -645,6 +672,7 @@ impl GMStrategy {
             .choices(&[
                 ("normal", "GM uses default ownership setting"),
                 ("never", "Never (GM never counts as owner)"),
+                ("always", "Always (GM always counts as owner)"),
                 (
                     "onlyIfExclusive",
                     "Only if Exclusive (GM is not considered owner if any players own the actor)",
@@ -778,6 +806,13 @@ impl Actor {
 
         match count_gm {
             GMStrategy::Normal => owns,
+            GMStrategy::Always => {
+                if is_gm {
+                    true
+                } else {
+                    owns
+                }
+            }
             GMStrategy::Never => {
                 if is_gm {
                     false
@@ -1019,6 +1054,12 @@ impl Message {
     }
 }
 
+impl FlagDocument for Message {
+    fn as_js_value(&self) -> &JsValue {
+        &self.inner
+    }
+}
+
 /// Represents a roll result
 pub struct Roll {
     inner: JsValue,
@@ -1034,6 +1075,18 @@ impl Roll {
     /// Get the total result of the roll
     pub fn total(&self) -> f64 {
         get_f64_property(&self.inner, "total").unwrap_or(0.0)
+    }
+
+    /// Check if this roll has actual dice
+    pub fn has_dice(&self) -> bool {
+        if let Ok(dice_val) = get_property(&self.inner, "dice") {
+            if let Ok(len) = js_sys::Reflect::get(&dice_val, &js_sys::JsString::from("length")) {
+                if let Ok(len_num) = len.dyn_into::<js_sys::Number>() {
+                    return len_num.as_f64().unwrap_or(0.0) > 0.0;
+                }
+            }
+        }
+        false
     }
 
     /// Get the underlying JsValue (for compatibility)

@@ -42,13 +42,14 @@ impl MessageState {
     }
 }
 
-async fn handle_message(message: Message) -> Result<(), Error> {
+async fn handle_message(message: Message, animation_complete: bool) -> Result<(), Error> {
     if !is_enabled("popupEnabled") || !is_enabled("globalPopupEnabled") {
         return Ok(());
     }
     let msg_type = message.pf2e_type().unwrap_or_default();
-    let is_healing_flavor = message.content().map(|c| c.contains("Healing Roll")).unwrap_or(false);
-    if !matches!(msg_type.as_str(), "damage-roll" | "spell-cast" | "healing-roll") && !is_healing_flavor {
+    let is_battle_medicine = message.flag("treat_wounds_battle_medicine.id").is_some();
+
+    if !matches!(msg_type.as_str(), "damage-roll" | "spell-cast" | "healing-roll") && !is_battle_medicine {
         return Ok(());
     }
 
@@ -59,15 +60,16 @@ async fn handle_message(message: Message) -> Result<(), Error> {
         .iter()
         .any(|i| i == "damaging-effect");
 
-    if (msg_type == "spell-cast" || is_healing_flavor) && damaging_effect {
+    if msg_type == "spell-cast" && damaging_effect {
         return Ok(());
     }
     let msg_id = message.id();
 
     let state = MessageState::get(&msg_id).await;
     let dice_so_nice_active = Game::is_module_active("dice-so-nice");
+    let has_dice = message.rolls().iter().any(|r| r.has_dice());
     let wait_for_animation =
-        msg_type == "damage-roll" && dice_so_nice_active && !state.animation_complete;
+        (msg_type == "damage-roll" || is_battle_medicine) && dice_so_nice_active && has_dice && !animation_complete;
     if wait_for_animation || state.popped_out {
         return Ok(());
     }
@@ -110,7 +112,7 @@ pub fn init() {
     });
 
     hook!("createChatMessage", async |message: JsValue| {
-        if let Err(err) = handle_message(message.into()).await {
+        if let Err(err) = handle_message(message.into(), false).await {
             cprintln!("Error in chat message handler: {err}");
         }
     });
@@ -118,7 +120,7 @@ pub fn init() {
     hook!(
         "updateChatMessage",
         async |message: JsValue, _changes: JsValue, _options: JsValue| {
-            if let Err(err) = handle_message(message.into()).await {
+            if let Err(err) = handle_message(message.into(), false).await {
                 cprintln!("Error in message update handler: {err}");
             }
         }
@@ -131,7 +133,7 @@ pub fn init() {
                 MessageState::update(msg_id.clone(), |state| state.animation_complete = true).await;
                 if let Ok(game) = Game::instance() {
                     if let Ok(Some(message)) = game.get_message(&msg_id) {
-                        if let Err(err) = handle_message(message).await {
+                        if let Err(err) = handle_message(message, true).await {
                             cprintln!("Error re-processing message after dice: {err}");
                         }
                     }
